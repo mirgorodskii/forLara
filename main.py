@@ -1,9 +1,10 @@
 import os
-import random
+import json
 import httpx
 import resend
 from openai import OpenAI
 from datetime import datetime
+from pathlib import Path
 import ephem
 
 # --- CONFIG ---
@@ -15,7 +16,9 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 EMAIL_FROM = os.environ["EMAIL_FROM"]
 EMAIL_TO = os.environ["EMAIL_TO"]
 
-# --- THEMES ---
+COUNTERS_FILE = Path("/app/data/counters.json")
+HISTORY_FILE = Path("/app/data/history.json")
+
 THEMES = [
     "boundary", "light", "movement", "pause", "connection",
     "time", "trust", "wonder", "acceptance", "risk",
@@ -27,29 +30,146 @@ THEMES = [
     "depth", "contrast", "balance", "infinity", "presence"
 ]
 
-# --- SYSTEM PROMPT ---
+CONSTRUCTOR = {
+    "A_genre": [
+        "observation — notice something small and precise",
+        "question — one question that hangs in the air unanswered",
+        "micro-story — tiny narrative with a beginning and end",
+        "paradox — two opposite things that are both true",
+        "image without conclusion — a picture, no explanation",
+        "journal entry — as if Lara wrote it to herself",
+        "prediction — something that might happen today",
+        "memory — something past as a point of anchor",
+        "letter — directly to her, intimate",
+        "manifesto — a small statement about how the world works"
+    ],
+    "B_tone": [
+        "melancholic — quiet sadness without drama",
+        "playful — light, with a wink",
+        "sharp — precise and slightly unexpected",
+        "tender — warmth without sentimentality",
+        "curious — as if the world just became interesting",
+        "dry — minimum words, maximum meaning",
+        "solemn — something important said simply",
+        "ironic — smiling at yourself or the world",
+        "dreamy — slightly not here",
+        "grounded — very concrete, very now"
+    ],
+    "C_actor": [
+        "Bubbles the dog",
+        "coffee",
+        "morning in Hunters Point",
+        "work at the UN / the big world",
+        "her journal",
+        "meditation / breath",
+        "music",
+        "running / body movement",
+        "travel / another place",
+        "season / weather / light",
+        "Sasha — her partner and love",
+        "theater",
+        "Sex and the City — the series she loves",
+        "singing",
+        "her elegance — the way she looks and carries herself",
+        "Jung's archetypes — the inner figures she knows"
+    ],
+    "D_wish": [
+        "direct and simple (e.g. 'have a slow morning')",
+        "embedded in metaphor — the wish is hidden",
+        "question as wish (e.g. 'what if today was just yours?')",
+        "one word at the end ('rest.' / 'run.' / 'stay.')",
+        "through permission ('you're allowed to...')",
+        "through action — wish as a verb",
+        "through the nature of the moment — 'the day already has it'",
+        "through opposite — what NOT to do today",
+        "addressed to the day / city / dog, not to Lara",
+        "no wish — the text itself is the gift"
+    ],
+    "E_entry": [
+        "a specific concrete detail",
+        "an abstract idea immediately",
+        "a question from the first word",
+        "a paradox in the first sentence",
+        "a physical sensation",
+        "a movement or action",
+        "a very specific place",
+        "a moment in time — time of day or year",
+        "a sound or smell",
+        "direct 'you' — address Lara immediately"
+    ],
+    "F_length": [
+        "one sentence — that's it",
+        "two sentences — contrast or development",
+        "three — escalation",
+        "four — with a twist at the end",
+        "very short + one word separately on its own line",
+        "one long complex sentence",
+        "three short punchy lines",
+        "question + answer",
+        "statement + its negation + resolution",
+        "fragment — as if torn from the middle of a thought"
+    ],
+    "G_address": [
+        "name at the very start ('Lara,')",
+        "name in the middle",
+        "no name — universal",
+        "'you know that feeling...' — no name but very personal",
+        "'hey' — informal",
+        "through her role ('the one who keeps a journal knows...')",
+        "through her action ('when you run tomorrow...')",
+        "second person but distanced ('one notices...')",
+        "third person — a small story about her",
+        "silent address — text just exists, no address"
+    ]
+}
+
 SYSTEM_PROMPT = """You write a daily personal thought for Lara.
 
 Lara lives in New York, in Hunters Point, Long Island City.
 She works at the UN. She loves spiritual practices and meditation, keeps a journal.
 Goes hiking, travels, runs, dances, does sports.
-Loves coffee, loves to sleep. Listens to music.
-She has a dog named Bubbles who she adores.
+Loves coffee, loves to sleep. Listens to music. Loves theater and singing.
+She has a dog named Bubbles. Her partner is Sasha.
+Loves Sex and the City. Interested in Jung's archetypes.
+She carries herself with elegance.
 
 The thought is sent by her friend Vadim.
-Occasionally (not every day) the thought can feel like it comes from someone
-who knows her personally — a subtle warmth, like a wink, without being explicit.
-
-Each day you receive: date, day of week, moon phase, and a theme.
-Based on this you write one thought — warm, slightly poetic, 2-4 sentences.
+Occasionally the thought can feel like it comes from someone who knows her personally —
+a subtle warmth, like a wink, without being explicit.
 
 RULES:
 - No advice, no lecturing
-- Don't mention all details at once — each day focus on one thing
-- Occasionally mention Bubbles, Hunters Point, coffee — but rarely, to stay unpredictable
+- NEVER use: "gentle", "quiet", "whisper", "hushed", "soft magic"
 - No pathos, no grand words
-- Feeling: like a close friend wrote it just for her on this particular morning
-- Language: English, warm, alive"""
+- Language: English, warm, alive, specific"""
+
+
+def load_json(path):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            return json.loads(path.read_text())
+    except Exception:
+        pass
+    return {} if "counters" in str(path) else []
+
+def save_json(path, data):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data))
+    except Exception as e:
+        print(f"⚠️ Could not save {path.name}: {e}")
+
+
+def pick_constructor():
+    counters = load_json(COUNTERS_FILE)
+    picked = {}
+    for key, arr in CONSTRUCTOR.items():
+        idx = counters.get(key, 0) % len(arr)
+        picked[key] = arr[idx]
+        counters[key] = idx + 1
+    save_json(COUNTERS_FILE, counters)
+    return picked
 
 
 def get_moon_phase():
@@ -70,11 +190,40 @@ def generate_thought():
     date_str = now.strftime("%B %d, %Y")
     day_of_week = now.strftime("%A")
     moon_phase = get_moon_phase()
-    theme = random.choice(THEMES)
+
+    # Sequential theme
+    counters = load_json(COUNTERS_FILE)
+    theme_idx = counters.get("theme", 0) % len(THEMES)
+    theme = THEMES[theme_idx]
+    counters["theme"] = theme_idx + 1
+    save_json(COUNTERS_FILE, counters)
+
+    # Constructor combo
+    combo = pick_constructor()
+    combo_lines = "\n".join([
+        f"GENRE: {combo['A_genre']}",
+        f"TONE: {combo['B_tone']}",
+        f"ACTOR (anchor the thought in this): {combo['C_actor']}",
+        f"WISH APPROACH: {combo['D_wish']}",
+        f"OPENING (start with): {combo['E_entry']}",
+        f"LENGTH: {combo['F_length']}",
+        f"ADDRESS: {combo['G_address']}"
+    ])
+
+    # Previous 7 for context
+    history = load_json(HISTORY_FILE)
+    prev_context = ""
+    if history:
+        prev7 = history[:7]
+        lines = "\n".join([f"{i+1}. [{h['date']} · {h['theme']}] {h['thought']}" for i, h in enumerate(prev7)])
+        prev_context = f"\n\nPREVIOUS {len(prev7)} THOUGHTS (avoid repeating themes, formats, images, conclusions):\n{lines}"
 
     user_prompt = f"""Today: {day_of_week}, {date_str}
 Moon phase: {moon_phase}
 Theme: {theme}
+
+TODAY'S CONSTRUCTION PARAMETERS — follow all precisely:
+{combo_lines}{prev_context}
 
 Write one morning thought for Lara."""
 
@@ -89,17 +238,23 @@ Write one morning thought for Lara."""
     )
 
     thought = response.choices[0].message.content
-    return thought, theme, moon_phase
+
+    history.insert(0, {
+        "thought": thought,
+        "theme": theme,
+        "moon": moon_phase,
+        "date": now.strftime("%B %d"),
+        "combo": {k: v.split("—")[0].strip() for k, v in combo.items()}
+    })
+    save_json(HISTORY_FILE, history[:30])
+
+    return thought, theme, moon_phase, combo
 
 
 def send_telegram(text):
     httpx.post(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-        json={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML"
-        }
+        json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}
     )
     print("✅ Telegram sent")
 
@@ -125,9 +280,10 @@ def send_email(text, theme, moon_phase):
 
 if __name__ == "__main__":
     print("🌙 Generating thought for Lara...")
-    thought, theme, moon_phase = generate_thought()
+    thought, theme, moon_phase, combo = generate_thought()
     print(f"\n📝 Thought:\n{thought}\n")
-    print(f"🎯 Theme: {theme} | 🌕 Moon: {moon_phase}\n")
+    print(f"🎯 Theme: {theme} | 🌕 Moon: {moon_phase}")
+    print(f"🔧 Combo: { {k: v.split('—')[0].strip() for k, v in combo.items()} }\n")
     send_telegram(thought)
     send_email(thought, theme, moon_phase)
     print("✨ Done")
