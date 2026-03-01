@@ -4,6 +4,9 @@
 
 PROMPTS = [
     # Day 1
+    "Good morning, luminous Lara.\nImpermanence sounds philosophical, but you practice it daily — you move, adapt, laugh, and don't cling too tightly. Even Bubbles probably senses that grounded calm in you. There's something quietly stable about your lightness. Let today feel like something you step into, not solve.\nFloat gently today.",
+
+    # Day 2
     "Morning, mountain-hearted woman.\nYou understand perspective — not just on trails, but in life. You rise above noise without disconnecting from care. That altitude of spirit makes your joy feel intentional. Keep that wide horizon inside you today.\nBreathe wide today.",
 
     # Day 2
