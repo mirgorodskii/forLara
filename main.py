@@ -59,7 +59,7 @@ def send_email(text):
             <p style="font-size: 12px; color: #999;">
                 {now.strftime('%A, %B %d')}
             </p>
-            <p style="font-size: 13px; color: #bbb; margin-top: 32px;">— V</p>
+            <p style="font-size: 13px; color: #bbb; margin-top: 32px;">— A, V, M</p>
         </div>
         """
     })
